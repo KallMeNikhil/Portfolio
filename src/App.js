@@ -1,17 +1,11 @@
-import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence, useScroll, useVelocity, useTransform, useSpring } from 'framer-motion';
-import { 
-  Trophy, 
-  Cpu, 
-  Layers, 
-  Mail, 
+import{
   Zap, 
   ChevronRight, 
   Volume2, 
-  VolumeX, 
-  Settings2,
-  ExternalLink, 
-  Code2, 
+  VolumeX,
+  ExternalLink,
   Database, 
   Layout, 
   Terminal, 
@@ -719,7 +713,9 @@ export default function App() {
     magnetY.set(0);
   };
 
-  useEffect(() => { cameraShake.set(velocity / 100); }, [velocity]);
+  useEffect(() => { 
+    cameraShake.set(velocity / 100); 
+  }, [velocity, cameraShake]);
 
   return (
     <motion.div style={{ x: useTransform(cameraShake, s => s * (Math.random() - 0.5)), y: useTransform(cameraShake, s => s * (Math.random() - 0.5)) }} className={`min-h-screen ${mood.bg} text-white font-sans selection:bg-white selection:text-black transition-colors duration-1000 overflow-x-hidden`}>
