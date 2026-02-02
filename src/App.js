@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence, useScroll, useVelocity, useTransform, useSpring } from 'framer-motion';
 import{
+  Cpu,
   Zap, 
   ChevronRight, 
   Volume2, 
