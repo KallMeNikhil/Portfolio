@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { motion, AnimatePresence, useScroll, useVelocity, useTransform, useSpring } from 'framer-motion';
+import { motion, AnimatePresence, useVelocity, useTransform, useSpring, useMotionValue } from 'framer-motion';
+import { PROJECTS_DATA } from "./data/projects";
+
 import{
   Cpu,
-  Zap, 
-  ChevronRight, 
+  Zap,
+  ChevronRight,
   Volume2, 
   VolumeX,
   ExternalLink,
@@ -67,10 +69,9 @@ const MOODS = {
 const ACCENTS = {
   RED: { name: 'Racing Red', color: '#ff1801', glow: 'shadow-red-500/50', border: 'border-red-500/30' },
   BLUE: { name: 'Electric Blue', color: '#00d2ff', glow: 'shadow-blue-500/50', border: 'border-blue-500/30' },
-  YELLOW: { name: 'Neon Yellow', color: '#facc15', glow: 'shadow-yellow-500/50', border: 'border-yellow-500/30' }
+  PURPLE: { name: 'Bright Purple', color: '#8F1FE3', glow: 'shadow-purple-500/50', border: 'border-purple-500/50'}
 };
 
-// --- SKELETON COMPONENT ---
 const SkeletonBlock = ({ className, delay = 0 }) => (
   <div className={`relative overflow-hidden bg-white/5 ${className}`}>
     <motion.div
@@ -87,16 +88,16 @@ const SkeletonBlock = ({ className, delay = 0 }) => (
   </div>
 );
 
-// --- REFINED GLASS WRAPPER ---
-const GlassPanel = ({ children, className = "", mood }) => (
-  <div className={`
-    relative overflow-hidden
-    border border-white/5 border-t-white/15
-    bg-gradient-to-b from-white/[0.03] to-transparent
-    bg-black/40 ${mood.blur} shadow-2xl shadow-black/40
-    ${className}
-  `}>
-    {/* Micro Reflection streak */}
+const GlassPanel = ({ children, className = "", mood, ...props }) => (
+
+  <div {...props}
+    className={`
+      relative overflow-hidden
+      border border-white/5 border-t-white/15
+      bg-gradient-to-b from-white/[0.03] to-transparent
+      bg-black/40 ${mood.blur} shadow-2xl shadow-black/40
+      ${className}
+    `}>
     <div className="absolute inset-0 bg-[linear-gradient(115deg,transparent_40%,rgba(255,255,255,0.02)_45%,rgba(255,255,255,0.02)_50%,transparent_55%)] pointer-events-none" />
     {children}
   </div>
@@ -114,27 +115,55 @@ const useSoundEngine = (isMuted) => {
     audioCtx.current = ctx;
     const filter = ctx.createBiquadFilter();
     filter.type = 'lowpass';
-    filter.frequency.setValueAtTime(1800, ctx.currentTime);
+    filter.frequency.setValueAtTime(6000, ctx.currentTime);
     masterFilter.current = filter;
     const gain = ctx.createGain();
-    gain.gain.setValueAtTime(0.6, ctx.currentTime);
+    gain.gain.setValueAtTime(1.0, ctx.currentTime);
     masterGain.current = gain;
     filter.connect(gain);
     gain.connect(ctx.destination);
-    const osc = ctx.createOscillator();
+
     const eGain = ctx.createGain();
-    osc.type = 'sawtooth';
-    osc.frequency.setValueAtTime(42, ctx.currentTime);
-    const oscFilter = ctx.createBiquadFilter();
-    oscFilter.type = 'lowpass';
-    oscFilter.frequency.setValueAtTime(120, ctx.currentTime);
-    eGain.gain.setValueAtTime(0, ctx.currentTime);
-    osc.connect(oscFilter);
-    oscFilter.connect(eGain);
+    eGain.gain.setValueAtTime(0.07, ctx.currentTime);
+
+    const subOsc = ctx.createOscillator();
+    subOsc.type = "sine";
+    subOsc.frequency.setValueAtTime(28, ctx.currentTime);
+
+    const bodyOsc = ctx.createOscillator();
+    bodyOsc.type = "triangle";
+    bodyOsc.frequency.setValueAtTime(55, ctx.currentTime);
+
+    const lfo = ctx.createOscillator();
+    lfo.type = "sine";
+    lfo.frequency.setValueAtTime(0.6, ctx.currentTime);
+
+    const subGain = ctx.createGain();
+    const bodyGain = ctx.createGain();
+    const lfoGain = ctx.createGain();
+
+    subGain.gain.value = 0.06;
+    bodyGain.gain.value = 0.04;
+    lfoGain.gain.value = 4;
+
+    lfo.connect(lfoGain);
+    lfoGain.connect(bodyOsc.frequency);
+
+    subOsc.connect(subGain);
+    bodyOsc.connect(bodyGain);
+
+    subGain.connect(eGain);
+    bodyGain.connect(eGain);
+
     eGain.connect(filter);
-    osc.start();
-    engineOsc.current = osc;
+
+    subOsc.start();
+    bodyOsc.start();
+    lfo.start();
+
+    engineOsc.current = bodyOsc;
     engineGain.current = eGain;
+
     return () => { ctx.close(); };
   }, []);
 
@@ -146,10 +175,20 @@ const useSoundEngine = (isMuted) => {
 
   const setEngineVelocity = useCallback((velocity) => {
     if (!engineOsc.current || isMuted) return;
-    const freq = 42 + (velocity / 20);
-    const gainVal = 0.04 + (Math.min(velocity, 500) / 10000);
-    engineOsc.current.frequency.setTargetAtTime(freq, audioCtx.current.currentTime, 0.2);
-    engineGain.current.gain.setTargetAtTime(gainVal, audioCtx.current.currentTime, 0.2);
+    const rpm = 55 + velocity / 15;
+
+    engineOsc.current.frequency.setTargetAtTime(
+      rpm,
+      audioCtx.current.currentTime,
+      0.3
+    );
+
+    engineGain.current.gain.setTargetAtTime(
+      0.07 + velocity / 5000,
+      audioCtx.current.currentTime,
+      0.3
+    );
+
   }, [isMuted]);
 
   const playClick = useCallback((pan = 0) => {
@@ -199,9 +238,12 @@ const useSoundEngine = (isMuted) => {
   }, [isMuted]);
 
   const playIgnition = useCallback((phase) => {
+
     if (isMuted || !audioCtx.current) return;
     const ctx = audioCtx.current;
     const now = ctx.currentTime;
+    engineGain.current.gain.setTargetAtTime(0.01, now, 0.2);
+
     if (phase === 1) {
       engineGain.current.gain.setTargetAtTime(0.05, now, 1.5);
       const osc = ctx.createOscillator();
@@ -210,7 +252,7 @@ const useSoundEngine = (isMuted) => {
       osc.frequency.setValueAtTime(110, now);
       osc.frequency.linearRampToValueAtTime(220, now + 1.5);
       g.gain.setValueAtTime(0, now);
-      g.gain.linearRampToValueAtTime(0.05, now + 0.8);
+      g.gain.linearRampToValueAtTime(0.12, now + 0.8);
       g.gain.linearRampToValueAtTime(0, now + 2.0);
       osc.connect(g);
       g.connect(masterFilter.current);
@@ -223,7 +265,7 @@ const useSoundEngine = (isMuted) => {
       osc.type = 'triangle';
       osc.frequency.setValueAtTime(150, now);
       g.gain.setValueAtTime(0, now);
-      g.gain.linearRampToValueAtTime(0.03, now + 0.1);
+      g.gain.linearRampToValueAtTime(0.08, now + 0.1);
       g.gain.exponentialRampToValueAtTime(0.001, now + 0.6);
       osc.connect(g);
       g.connect(masterFilter.current);
@@ -236,7 +278,7 @@ const useSoundEngine = (isMuted) => {
       osc.type = 'sine';
       osc.frequency.setValueAtTime(100, now);
       osc.frequency.exponentialRampToValueAtTime(400, now + 0.8);
-      g.gain.setValueAtTime(0.1, now);
+      g.gain.setValueAtTime(0.18, now);
       g.gain.exponentialRampToValueAtTime(0.001, now + 0.8);
       osc.connect(g);
       g.connect(masterFilter.current);
@@ -244,19 +286,19 @@ const useSoundEngine = (isMuted) => {
       osc.stop(now + 0.8);
     }
     if (phase === 4) {
-      playSwoosh();
       const osc = ctx.createOscillator();
       const g = ctx.createGain();
       osc.type = 'sine';
       osc.frequency.setValueAtTime(1500, now);
-      g.gain.setValueAtTime(0.03, now);
+      g.gain.setValueAtTime(0.1, now);
       g.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
       osc.connect(g);
       g.connect(masterFilter.current);
       osc.start();
       osc.stop(now + 0.1);
+
     }
-  }, [isMuted, playSwoosh]);
+  }, [isMuted]);
 
   return { playClick, playSwoosh, playIgnition, setEngineVelocity };
 };
@@ -287,7 +329,7 @@ const IgnitionSequence = ({ accent, mood, onComplete, playIgnition }) => {
       <motion.div initial={{ top: '-100%', left: '-100%' }} animate={{ top: '100%', left: '100%' }} transition={{ delay: 1.8, duration: 1.0, ease: "easeInOut" }} className="absolute w-[200%] h-40 bg-white/5 blur-3xl -rotate-45 z-50 pointer-events-none" />
       <div className="relative flex flex-col items-center z-40">
         <motion.div layoutId="main-logo" initial={{ opacity: 0, scale: 0.7, rotateY: 20 }} animate={{ opacity: 1, scale: [0.7, 1.05, 0.9], rotateY: 0 }} transition={{ duration: 2.4, times: [0, 0.4, 1], ease: "circOut" }}>
-          <LogoGraphic accentColor={accent.color} className="w-40 h-40 md:w-56 md:h-56" />
+          <LogoGraphic accentColor={accent.color} className="w-28 h-28 sm:w-40 sm:h-40 md:w-56 md:h-56" />
           <svg className="absolute inset-[-60px] w-[calc(100%+120px)] h-[calc(100%+120px)] pointer-events-none">
             <motion.circle cx="50%" cy="50%" r="48%" fill="none" stroke={accent.color} strokeWidth="1" strokeDasharray="4 8" initial={{ pathLength: 0, opacity: 0 }} animate={{ pathLength: [0, 0.8, 0.8], opacity: [0, 0.4, 0] }} transition={{ delay: 0.6, duration: 1.6, times: [0, 0.7, 1] }} />
           </svg>
@@ -362,7 +404,7 @@ const RacingBackground = ({ mood, scrollSpeed, accentColor, triggerHero }) => {
     init(); draw(0); window.addEventListener('resize', init); return () => { cancelAnimationFrame(animationFrameId); window.removeEventListener('resize', init); };
   }, [mood, scrollSpeed, accentColor, triggerHero]);
 
-  return ( <div className="fixed inset-0 pointer-events-none z-0"> <canvas ref={canvasRef} className="w-full h-full" /> <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,transparent_35%,rgba(0,0,0,0.5)_100%)]" /> </div> );
+  return ( <div className="fixed inset-0 pointer-events-none z-0"> <canvas ref={canvasRef} className="w-full h-full pointer-events-none" /> <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,transparent_35%,rgba(0,0,0,0.5)_100%)]" /> </div> );
 };
 
 const StealthControls = ({ mood, accent, cycleMood, cycleAccent, isMuted, setIsMuted, scrollVelocity, playClick }) => {
@@ -395,10 +437,13 @@ const StealthControls = ({ mood, accent, cycleMood, cycleAccent, isMuted, setIsM
   );
 };
 
-// --- CONTENT VIEWS ---
 
 const Home = ({ accent, mood, isResolving }) => (
-  <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="relative min-h-screen flex flex-col justify-center px-8 lg:px-24">
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      className="relative min-h-[100svh] flex flex-col justify-start sm:justify-center mt-20 sm:mt-0 px-4 sm:px-8 lg:px-24"
+    >
     <AnimatePresence mode="wait">
       {isResolving ? (
         <div key="skeleton" className="max-w-4xl space-y-8">
@@ -416,23 +461,23 @@ const Home = ({ accent, mood, isResolving }) => (
         </div>
       ) : (
         <motion.div key="content" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="max-w-4xl relative z-10">
-          <motion.span initial={{ letterSpacing: '0.5em', opacity: 0 }} animate={{ letterSpacing: '0.4em', opacity: 1 }} className="mt-10 text-xs uppercase font-black text-white/40 mb-6 block">CREATING DIGITAL EXPERIENCES</motion.span>
-          <h1 className="text-7xl lg:text-9xl font-black italic text-white leading-[0.85] tracking-tighter mb-8">
+          <motion.span initial={{ letterSpacing: '0.5em', opacity: 0 }} animate={{ letterSpacing: '0.4em', opacity: 1 }} className="mt-4 sm:mt-10 text-xs uppercase font-black text-white/40 mb-4 sm:mb-6 block">CREATING DIGITAL EXPERIENCES</motion.span>
+          <h1 className="text-5xl sm:text-7xl lg:text-9xl font-black italic text-white leading-[0.85] tracking-tighter mb-8">
             Hi , I’m <br />
             <span style={{ color: accent.color }}>NIKHIL</span>
           </h1>
 
           <p className="text-sm uppercase tracking-[0.4em] text-white/40 mb-6">
-          React • Node • MongoDB • UI Engineering
+          React • Node • JavaScript • UI/UX Design
           </p>
 
-          <p className="text-lg lg:text-2xl text-white/50 max-w-xl font-medium leading-relaxed mb-12 border-l-4 pl-8" style={{ borderColor: accent.color }}>
+          <p className="text-base sm:text-lg lg:text-2xl text-white/50 max-w-xl font-medium leading-relaxed mb-12 border-l-4 pl-8" style={{ borderColor: accent.color }}>
           Full-stack developer focused on building performant web apps, immersive UI experiences, and real-world products using React, Node, and modern tooling.
           </p>
           <div className="flex flex-wrap gap-12 items-center">
             <div className="flex flex-col">
               <span className="text-[10px] uppercase text-white/20 font-black tracking-widest mb-1">PROJECTS</span>
-              <span className="text-4xl font-black italic" style={{ color: accent.color }}>10+</span>
+              <span className="text-4xl font-black italic" style={{ color: accent.color }}>7+</span>
             </div>
 
             <div className="flex flex-col">
@@ -453,10 +498,10 @@ const Home = ({ accent, mood, isResolving }) => (
 );
 
 const About = ({ accent, mood, isResolving }) => (
-  <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="min-h-screen pt-32 pb-48 px-8 lg:px-24">
+  <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="min-h-screen pt-32 pb-48 px-4 sm:px-4 sm:px-8 lg:px-24">
     <AnimatePresence mode="wait">
       {isResolving ? (
-        <div key="skeleton" className="grid lg:grid-cols-2 gap-16">
+        <div key="skeleton" className="grid grid-cols-1 lg:grid-cols-2 gap-16">
           <div className="space-y-12">
             <SkeletonBlock className="h-12 w-64 rounded-xl" />
             <SkeletonBlock className="h-64 w-full rounded-[2rem]" />
@@ -468,10 +513,10 @@ const About = ({ accent, mood, isResolving }) => (
           </div>
         </div>
       ) : (
-        <motion.div key="content" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="grid lg:grid-cols-2 gap-16 items-start relative z-10">
+        <motion.div key="content" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="grid grid-cols-1 lg:grid-cols-2 gap-16 items-start relative z-10">
           <div>
             <h2 className="text-5xl font-black italic text-white mb-12 uppercase tracking-tighter">ABOUT ME</h2>
-            <GlassPanel mood={mood} className="p-10 rounded-[2rem]">
+            <GlassPanel mood={mood} className="p-6 sm:p-10 rounded-[2rem]">
               <p className="text-xl text-white/70 leading-relaxed mb-8 relative z-10">
               I’m NiKHiL, a full-stack developer who enjoys turning complex problems into clean, performant web experiences. I focus on building practical products using modern JavaScript frameworks and backend systems.
               </p>
@@ -499,8 +544,16 @@ const About = ({ accent, mood, isResolving }) => (
   </motion.div>
 );
 
-const Skills = ({ accent, mood, isResolving }) => (
-  <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="min-h-screen pt-32 pb-48 px-8 lg:px-24">
+const Skills = ({ accent, mood, isResolving }) => {
+
+  const getSkillLabel = (level) => {
+    if (level >= 80) return "MASTERED";
+    if (level >= 60) return "PROFICIENT";
+    return "LEARNING";
+  };
+
+  return (
+  <div className="min-h-screen pt-32 pb-48 px-4 sm:px-4 sm:px-8 lg:px-24">
     <h2 className="text-5xl font-black italic text-white mb-16 uppercase tracking-tighter">TECHNICAL SKILLS</h2>
     <AnimatePresence mode="wait">
       {isResolving ? (
@@ -512,46 +565,115 @@ const Skills = ({ accent, mood, isResolving }) => (
           {[
             {
               title: "FRONTEND",
-              items: ["React", "Tailwind", "Framer Motion", "JavaScript", "HTML/CSS"],
-              icon: <Layout />
+              icon: <Layout />,
+              items: [
+                { name: "React", level: 75 },
+                { name: "Tailwind", level: 70 },
+                { name: "Framer Motion", level: 50 },
+                { name: "JavaScript", level: 90 },
+                { name: "HTML/CSS", level: 95 }
+              ]
             },
             {
               title: "BACKEND",
-              items: ["Node.js", "Express", "MongoDB", "REST APIs", "PostgreSQL"],
-              icon: <Cpu />
+              icon: <Cpu />,
+              items: [
+                { name: "Node.js", level: 60 },
+                { name: "Express", level: 40 },
+                { name: "MongoDB", level: 45 },
+                { name: "REST APIs", level: 30 },
+                { name: "PostgreSQL", level: 25 }
+              ]
             },
             {
               title: "DEVOPS",
-              items: ["Vercel", "GitHub", "Netlify", "Basic CI/CD", "Deployment"],
-              icon: <Database />
+              icon: <Database />,
+              items: [
+                { name: "Vercel", level: 90 },
+                { name: "GitHub", level: 85 },
+                { name: "Netlify", level: 80 },
+                { name: "Basic CI/CD", level: 75 },
+                { name: "Deployment", level: 90 }
+              ]
             },
             {
               title: "TOOLS",
-              items: ["Git", "GitHub", "Vercel", "VS Code", "Figma"],
-              icon: <Terminal />
+              icon: <Terminal />,
+              items: [
+                { name: "Git", level: 75 },
+                { name: "GitHub", level: 85 },
+                { name: "Vercel", level: 90 },
+                { name: "VS Code", level: 95 },
+                { name: "Figma", level: 65 }
+              ]
             }
           ].map((group, idx) => (
-            <GlassPanel key={idx} mood={mood} className="p-10 rounded-[2rem] group transition-colors hover:border-white/10">
+            <GlassPanel key={idx} mood={mood} className="p-6 sm:p-10 rounded-[2rem] group transition-colors hover:border-white/10">
               <div className="mb-8 p-4 rounded-xl bg-white/5 inline-block group-hover:rotate-12 transition-transform" style={{ color: accent.color }}>{group.icon}</div>
               <h3 className="text-xl font-black italic text-white mb-8 uppercase tracking-widest">{group.title}</h3>
-              <div className="flex flex-col gap-6">
+              <motion.div
+                className="flex flex-col gap-6"
+                initial="hidden"
+                animate="show"
+                variants={{
+                  hidden: {},
+                  show: {
+                    transition: {
+                      staggerChildren: 0.12
+                    }
+                  }
+                }}
+              >
                 {group.items.map((skill, sIdx) => (
-                  <div key={sIdx} className="flex flex-col gap-2">
-                    <div className="flex justify-between text-[10px] font-black uppercase text-white/30"><span>{skill}</span><span style={{ color: accent.color }}>OPTIMIZED</span></div>
-                    <div className="h-1 w-full bg-white/5 rounded-full overflow-hidden"><motion.div initial={{ width: 0 }} animate={{ width: `${95 - sIdx * 4}%` }} transition={{ duration: 1.5, delay: 0.1 * sIdx, ease: "circOut" }} className="h-full" style={{ backgroundColor: accent.color }} /></div>
-                  </div>
+                  <motion.div
+                    key={sIdx}
+                    className="flex flex-col gap-2"
+                    variants={{
+                      hidden: { opacity: 0, y: 10 },
+                      show: {
+                        opacity: 1,
+                        y: 0,
+                        transition: { duration: 0.4, ease: "easeOut" }
+                      }
+                    }}
+                  >
+
+                    <div className="flex justify-between text-[10px] font-black uppercase text-white/30">
+                      <span>{skill.name}</span>
+                      <span style={{ color: accent.color }}>
+                        {getSkillLabel(skill.level)}
+                      </span>
+                    </div>
+
+                    <div className="h-1 w-full bg-white/5 rounded-full overflow-hidden">
+
+                      <motion.div
+                        initial={{ width: 0 }}
+                        animate={{ width: `${skill.level}%` }}
+                        transition={{ duration: 1.2, ease: "circOut" }}
+                        className="h-full"
+                        style={{ backgroundColor: accent.color }}
+                      />
+
+                    </div>
+
+                  </motion.div>
                 ))}
-              </div>
+              </motion.div>
             </GlassPanel>
           ))}
         </motion.div>
       )}
     </AnimatePresence>
-  </motion.div>
-);
+  </div>
+  );
+};
 
-const Projects = ({ accent, mood, isResolving }) => (
-  <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="min-h-screen pt-32 pb-48 px-8 lg:px-24">
+const Projects = ({ accent, mood, isResolving, playClick }) => {
+  const [activeProject, setActiveProject] = useState(null);
+
+  return (
+  <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="min-h-screen pt-32 pb-48 px-4 sm:px-4 sm:px-8 lg:px-24">
     <div className="flex flex-col lg:flex-row lg:items-end justify-between mb-20 gap-8">
       <h2 className="text-5xl font-black italic text-white uppercase leading-none tracking-tighter">PROJECTS</h2>
       <div className="text-[10px] uppercase font-black text-white/30 tracking-[0.5em] flex items-center gap-3">SEASON_CURRENT <span className="w-16 h-[1px] bg-white/10" /> TECHNICAL_CIRCUIT</div>
@@ -563,33 +685,17 @@ const Projects = ({ accent, mood, isResolving }) => (
         </div>
       ) : (
         <motion.div key="content" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="grid md:grid-cols-2 gap-10 relative z-10">
-          {[
-            {
-              name: "Green Delhi Platform",
-              type: "FULL STACK",
-              stack: ["React", "Node.js", "MongoDB"],
-              impact: "REAL WORLD PROJECT"
-            },
-            {
-              name: "Personal Portfolio",
-              type: "FRONTEND",
-              stack: ["React", "Tailwind", "Framer Motion"],
-              impact: "CUSTOM UI/UX"
-            },
-            {
-              name: "Voting Web App",
-              type: "WEB APP",
-              stack: ["React", "Express", "PostgreSQL"],
-              impact: "AUTH + DASHBOARD"
-            },
-            {
-              name: "Learning Projects Collection",
-              type: "PRACTICE",
-              stack: ["JavaScript", "APIs", "Git"],
-              impact: "CONTINUOUS IMPROVEMENT"
-            }
-          ].map((proj, idx) => (
-            <GlassPanel key={idx} mood={mood} className="p-12 rounded-[2.5rem] cursor-pointer group transition-all hover:border-white/10">
+          {PROJECTS_DATA.map((proj, idx) => (
+            <GlassPanel
+              key={proj.id}
+              mood={mood}
+              onClick={() => {
+                playClick();
+                setActiveProject(proj);
+              }}
+              className="p-6 sm:p-12 rounded-[2.5rem] cursor-pointer
+                        group transition-all hover:border-white/10"
+            >
               <div className="absolute top-0 left-0 w-full h-[2px] bg-white/5 group-hover:bg-gradient-to-r transition-all" style={{ backgroundImage: `linear-gradient(to right, transparent, ${accent.color}, transparent)` }} />
               <div className="flex justify-between items-start mb-16">
                 <div><span className="text-[10px] font-black uppercase tracking-[0.4em] text-white/20 mb-3 block">{proj.type}</span><h3 className="text-4xl font-black italic text-white uppercase tracking-tighter group-hover:translate-x-3 transition-transform">{proj.name}</h3></div>
@@ -602,11 +708,20 @@ const Projects = ({ accent, mood, isResolving }) => (
         </motion.div>
       )}
     </AnimatePresence>
+    {activeProject && (
+      <ProjectModal
+        project={activeProject}
+        onClose={() => setActiveProject(null)}
+        accent={accent}
+        mood={mood}
+      />
+    )}
   </motion.div>
-);
+  );
+};
 
 const Experience = ({ accent, mood }) => (
-  <div className="min-h-screen pt-32 pb-48 px-8 lg:px-24">
+  <div className="min-h-screen pt-32 pb-48 px-4 sm:px-4 sm:px-8 lg:px-24">
     <h2 className="text-5xl font-black italic text-white mb-16">EXPERIENCE</h2>
 
     <div className="space-y-10">
@@ -623,7 +738,7 @@ const Experience = ({ accent, mood }) => (
 );
 
 const Education = ({ accent, mood }) => (
-  <div className="min-h-screen pt-32 pb-48 px-8 lg:px-24">
+  <div className="min-h-screen pt-32 pb-48 px-4 sm:px-4 sm:px-8 lg:px-24">
     <h2 className="text-5xl font-black italic text-white mb-16">EDUCATION</h2>
 
     <GlassPanel mood={mood} className="p-10 rounded-3xl max-w-2xl">
@@ -639,7 +754,7 @@ const Education = ({ accent, mood }) => (
 );
 
 const Contact = ({ accent, mood }) => (
-  <div className="min-h-screen pt-32 pb-48 px-8 lg:px-24">
+  <div className="min-h-[100svh] pt-32 pb-64 px-4 sm:px-8 lg:px-24">
     <h2 className="text-5xl font-black italic text-white mb-16">CONTACT</h2>
 
     <GlassPanel mood={mood} className="p-12 rounded-3xl max-w-xl">
@@ -664,18 +779,224 @@ const Contact = ({ accent, mood }) => (
   </div>
 );
 
+const ProjectModal = ({ project, onClose, accent }) => {
+  const [repoData, setRepoData] = useState(null);
+  const [contributors, setContributors] = useState([]);
+  const isLoadingRepo = !repoData;
+  const repoCacheKey = `repo-${project.repo}`;
+  const contributorsCacheKey = `contributors-${project.repo}`;
+
+  useEffect(() => {
+    if (!project.repo) return;
+
+    const cachedRepo = localStorage.getItem(repoCacheKey);
+    if (cachedRepo) {
+      setRepoData(JSON.parse(cachedRepo));
+    } else {
+      fetch(`https://api.github.com/repos/${project.repo}`)
+        .then(res => res.json())
+        .then(data => {
+          setRepoData(data);
+          localStorage.setItem(repoCacheKey, JSON.stringify(data));
+        })
+        .catch(() => {});
+    }
+
+    const cachedContributors = localStorage.getItem(contributorsCacheKey);
+    if (cachedContributors) {
+      setContributors(JSON.parse(cachedContributors));
+    } else {
+      fetch(`https://api.github.com/repos/${project.repo}/contributors`)
+        .then(res => res.json())
+        .then(data => {
+          setContributors(data);
+          localStorage.setItem(
+            contributorsCacheKey,
+            JSON.stringify(data)
+          );
+        })
+        .catch(() => {});
+    }
+
+  }, [project.repo, repoCacheKey, contributorsCacheKey]);
+
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-[999] bg-black/80
+                flex items-center justify-center px-6"
+    >
+      <motion.div
+        initial={{ scale: 0.92, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        exit={{ scale: 0.92, opacity: 0 }}
+        transition={{ type: "spring", stiffness: 140, damping: 18 }}
+        className="max-w-xl w-full bg-neutral-900
+           p-6 sm:p-10 rounded-3xl relative
+           max-h-[85vh] overflow-y-auto"
+      >
+
+        <button
+          onClick={onClose}
+          className="sticky top-0 ml-auto mb-4
+                    text-white/40 hover:text-white"
+        >
+          ✕
+        </button>
+
+        <h2
+          className="text-3xl font-black italic mb-4"
+          style={{ color: accent.color }}
+        >
+          {project.name}
+        </h2>
+
+        <p className="text-white/60 mb-6">
+          {project.description || "Project details coming soon."}
+        </p>
+
+        {isLoadingRepo ? (
+          <div className="flex gap-6 mb-6">
+            <div className="w-16 h-4 bg-white/10 rounded animate-pulse" />
+            <div className="w-16 h-4 bg-white/10 rounded animate-pulse" />
+            <div className="w-16 h-4 bg-white/10 rounded animate-pulse" />
+          </div>
+        ) : (
+          <div className="flex gap-6 text-sm text-white/50 mb-6">
+            <span>⭐ {repoData.stargazers_count}</span>
+            <span>🍴 {repoData.forks_count}</span>
+            <span>👁 {repoData.watchers_count}</span>
+          </div>
+        )}
+
+        {contributors.length > 0 && (
+          <div className="flex items-center gap-2 mb-6">
+            {contributors.slice(0, 5).map(c => (
+              <img
+                key={c.id}
+                src={c.avatar_url}
+                alt={c.login}
+                title={c.login}
+                className="w-8 h-8 rounded-full border border-white/20"
+              />
+            ))}
+          </div>
+        )}
+
+        <div className="flex flex-wrap gap-2">
+          {project.stack.map(s => (
+            <span
+              key={s}
+              className="px-3 py-1 text-xs border border-white/10 rounded"
+            >
+              {s}
+            </span>
+          ))}
+        </div>
+
+      <div className="flex flex-wrap gap-4 mt-8">
+        <a
+          href={`https://github.com/${project.repo}`}
+          target="_blank"
+          rel="noreferrer"
+          className="flex items-center gap-2 px-5 py-2
+                    border border-white/20 rounded-lg
+                    text-white hover:bg-white hover:text-black
+                    transition-all"
+        >
+          <Github size={16} />
+          GitHub
+        </a>
+
+        {project.live && (
+          <a
+            href={project.live}
+            target="_blank"
+            rel="noreferrer"
+            className="flex items-center gap-2 px-5 py-2
+                      rounded-lg font-black text-black"
+            style={{ backgroundColor: accent.color }}
+          >
+            <ExternalLink size={16} />
+            Live Demo
+          </a>
+        )}
+      </div>
+      </motion.div>
+    </motion.div>
+  );
+};
+
 export default function App() {
   const [isLoading, setIsLoading] = useState(true);
   const [isResolving, setIsResolving] = useState(false);
   const [activePage, setActivePage] = useState('HOME');
   const [mood, setMood] = useState(MOODS.AURA);
-  const [accent, setAccent] = useState(ACCENTS.RED);
+  const [accent, setAccent] = useState(ACCENTS.BLUE);
   const [isMuted, setIsMuted] = useState(false);
   const [triggerHero, setTriggerHero] = useState(0);
   const { playClick, playSwoosh, playIgnition, setEngineVelocity } = useSoundEngine(isMuted);
-  const { scrollY } = useScroll();
+  const scrollY = useMotionValue(0);
   const scrollVelocity = useVelocity(scrollY);
   const [velocity, setVelocity] = useState(0);
+  const [scrollProgress, setScrollProgress] = useState(0);
+  const [showProgress, setShowProgress] = useState(false)
+
+  const navRefs = useRef({});
+
+  useEffect(() => {
+    let hideTimeout;
+
+    const handleScroll = () => {
+      const scrollTop = window.scrollY;
+      const docHeight =
+        document.documentElement.scrollHeight - window.innerHeight;
+
+      const progress = docHeight > 0 ? scrollTop / docHeight : 0;
+
+      scrollY.set(scrollTop);
+      setScrollProgress(progress);
+
+      if (scrollTop > 5) {
+        setShowProgress(true);
+        clearTimeout(hideTimeout);
+
+        hideTimeout = setTimeout(() => {
+          setShowProgress(false);
+        }, 900); // fades after user stops scrolling
+      }
+    };
+
+    window.addEventListener("scroll", handleScroll);
+
+    return () => {
+      window.removeEventListener("scroll", handleScroll);
+      clearTimeout(hideTimeout);
+    };
+  }, [scrollY]);
+
+  useEffect(() => {
+    const savedMood = localStorage.getItem("mood");
+    const savedAccent = localStorage.getItem("accent");
+
+    if (savedMood && MOODS[savedMood]) setMood(MOODS[savedMood]);
+    if (savedAccent && ACCENTS[savedAccent]) setAccent(ACCENTS[savedAccent]);
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem("mood", mood.name);
+  }, [mood]);
+
+  useEffect(() => {
+    const accentKey = Object.keys(ACCENTS).find(
+      key => ACCENTS[key] === accent
+    );
+
+    if (accentKey) localStorage.setItem("accent", accentKey);
+  }, [accent]);
 
   useEffect(() => {
     return scrollVelocity.onChange((v) => { const absV = Math.abs(v); setVelocity(absV); setEngineVelocity(absV); });
@@ -690,7 +1011,7 @@ export default function App() {
       setActivePage(page);
       setTriggerHero(prev => prev + 1);
       window.scrollTo({ top: 0, behavior: 'smooth' });
-      setTimeout(() => setIsResolving(false), 400); // Buffer for perceived performance
+      setTimeout(() => setIsResolving(false), 400);
     }, 150);
   };
 
@@ -718,11 +1039,43 @@ export default function App() {
     cameraShake.set(velocity / 100); 
   }, [velocity, cameraShake]);
 
+  useEffect(() => {
+    const el = navRefs.current[activePage];
+    if (el && window.innerWidth < 768) {
+      el.scrollIntoView({
+        behavior: "smooth",
+        inline: "center",
+        block: "nearest"
+      });
+    }
+  }, [activePage]);
+
+
   return (
+    <>
+    <AnimatePresence>
+      {showProgress && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.4 }}
+          className="fixed top-0 left-0 h-[2px] z-[9999]"
+          style={{
+            width: `${scrollProgress * 100}%`,
+            backgroundColor: accent.color,
+            boxShadow: `0 0 8px ${accent.color}`
+          }}
+        />
+      )}
+    </AnimatePresence>
+
     <motion.div style={{ x: useTransform(cameraShake, s => s * (Math.random() - 0.5)), y: useTransform(cameraShake, s => s * (Math.random() - 0.5)) }} className={`min-h-screen ${mood.bg} text-white font-sans selection:bg-white selection:text-black transition-colors duration-1000 overflow-x-hidden`}>
       <AnimatePresence> {isLoading && <IgnitionSequence key="ignition" accent={accent} mood={mood} playIgnition={playIgnition} onComplete={() => setIsLoading(false)} />} </AnimatePresence>
       <RacingBackground mood={mood} scrollSpeed={velocity} accentColor={accent.color} triggerHero={triggerHero} />
-      <motion.nav initial={{ opacity: 0, y: -20 }} animate={{ opacity: isLoading ? 0 : 1, y: isLoading ? -20 : 0 }} transition={{ delay: 0.4, duration: 0.8 }} className={`fixed top-0 left-0 w-full z-50 p-8 flex justify-between items-center transition-all ${velocity > 60 ? 'backdrop-blur-3xl bg-black/40 border-b border-white/5' : ''}`}>
+      <motion.nav
+        className={`fixed top-0 left-0 w-full z-50 px-4 sm:px-8 py-4 flex justify-between items-center`}
+      >
         <div className="flex items-center gap-5 cursor-pointer group" onClick={() => navigate('HOME', 0)}>
           <motion.div layoutId="main-logo" className="w-12 h-12 flex items-center justify-center transition-all group-hover:scale-110">
             <LogoGraphic accentColor={accent.color} className="w-10 h-10" />
@@ -732,12 +1085,28 @@ export default function App() {
             <p className="text-[10px] uppercase font-black text-white/20 tracking-widest">FULL STACK DEVELOPER</p>
           </div>
         </div>
-        <div className="flex gap-8 lg:gap-14">
+        <div className="relative mx-4 md:mx-0 max-w-[60vw] md:max-w-full overflow-hidden">
+          <div
+            className="
+              flex gap-8 lg:gap-14
+              overflow-x-auto
+              scrollbar-hide
+              snap-x snap-mandatory
+              whitespace-nowrap
+              overscroll-x-contain
+            "
+            style={{
+              WebkitOverflowScrolling: "touch",
+              touchAction: "pan-x"
+            }}
+          >
+
           {['HOME','ABOUT','SKILLS','PROJECTS','EXPERIENCE','EDUCATION','CONTACT'].map((item, idx) => (
-            <button key={item} onClick={() => navigate(item, idx)} className={`text-[11px] font-black tracking-[0.4em] uppercase transition-all relative py-3 ${activePage === item ? 'text-white' : 'text-white/20 hover:text-white'}`}>{item}
+            <button key={item} ref={(el) => (navRefs.current[item] = el)} onClick={() => navigate(item, idx)} className={`text-[11px] shrink-0 snap-start font-black tracking-[0.4em] uppercase transition-all relative py-3 ${activePage === item ? 'text-white' : 'text-white/20 hover:text-white'}`}>{item}
               {activePage === item && <motion.div layoutId="navUnderline" className="absolute bottom-0 left-0 w-full h-[3px]" style={{ backgroundColor: accent.color }} />}
             </button>
           ))}
+          </div>
         </div>
           <motion.button
             ref={connectRef}
@@ -758,7 +1127,7 @@ export default function App() {
             onMouseMove={handleMagnetMove}
             onMouseLeave={resetMagnet}
             onHoverStart={() => playIgnition(4)}
-            className="hidden md:flex items-center gap-4 px-8 py-3 rounded-sm border border-white/10 text-[10px] font-black uppercase hover:bg-white hover:text-black transition-all group tracking-[0.2em]"
+            className="flex items-center gap-3 px-4 sm:px-8 py-2 sm:py-3 rounded-sm border border-white/10 text-[9px] sm:text-[10px] font-black uppercase hover:bg-white hover:text-black transition-all group tracking-[0.2em]"
             onClick={() => {
               playClick();
               navigate('CONTACT', 6);
@@ -772,6 +1141,10 @@ export default function App() {
               <ChevronRight size={14} />
             </motion.span>
           </motion.button>
+
+          <div className="pointer-events-none absolute left-0 top-0 h-full w-10 bg-gradient-to-r from-black to-transparent md:hidden" />
+          <div className="pointer-events-none absolute right-0 top-0 h-full w-10 bg-gradient-to-l from-black to-transparent md:hidden" />
+
       </motion.nav>
 
       <motion.main initial={{ opacity: 0 }} animate={{ opacity: isLoading ? 0 : 1 }} transition={{ delay: 0.6, duration: 0.8 }} className="relative z-10">
@@ -779,23 +1152,24 @@ export default function App() {
           {activePage === 'HOME' && <Home key="home" accent={accent} mood={mood} isResolving={isResolving} />}
           {activePage === 'ABOUT' && <About key="about" accent={accent} mood={mood} isResolving={isResolving} />}
           {activePage === 'SKILLS' && <Skills key="skills" accent={accent} mood={mood} isResolving={isResolving} />}
-          {activePage === 'PROJECTS' && <Projects key="projects" accent={accent} mood={mood} isResolving={isResolving} />}
+          {activePage === 'PROJECTS' && <Projects key="projects" accent={accent} mood={mood} isResolving={isResolving} playClick={playClick} />}
           {activePage === 'EXPERIENCE' && <Experience accent={accent} mood={mood} />}
           {activePage === 'EDUCATION' && <Education accent={accent} mood={mood} />}
           {activePage === 'CONTACT' && <Contact accent={accent} mood={mood} />}
         </AnimatePresence>
       </motion.main>
 
-      {!isLoading && <StealthControls mood={mood} accent={accent} cycleMood={() => { if(mood.name==='VOID') setMood(MOODS.AURA); else if(mood.name==='AURA') setMood(MOODS.PULSE); else setMood(MOODS.VOID); }} cycleAccent={() => { if(accent.name==='Racing Red') setAccent(ACCENTS.BLUE); else if(accent.name==='Electric Blue') setAccent(ACCENTS.YELLOW); else setAccent(ACCENTS.RED); }} isMuted={isMuted} setIsMuted={setIsMuted} scrollVelocity={scrollVelocity} playClick={playClick} />}
+      {!isLoading && <StealthControls mood={mood} accent={accent} cycleMood={() => { if(mood.name==='VOID') setMood(MOODS.AURA); else if(mood.name==='AURA') setMood(MOODS.PULSE); else setMood(MOODS.VOID); }} cycleAccent={() => { if(accent.name==='Racing Red') setAccent(ACCENTS.BLUE); else if(accent.name==='Electric Blue') setAccent(ACCENTS.PURPLE); else setAccent(ACCENTS.RED); }} isMuted={isMuted} setIsMuted={setIsMuted} scrollVelocity={scrollVelocity} playClick={playClick} />}
       
+
       <footer className="relative z-10 py-12 flex flex-col items-center gap-6 text-white/40 text-xs">
-        <div className="flex gap-6">
+        <div className="flex gap-4 sm:gap-6">
 
           <motion.a
             whileHover={{ scale: 1.15 }}
             whileTap={{ scale: 0.95 }}
             onHoverStart={() => !isMuted && playIgnition(2)}
-            href="https://github.whyikhil.xyz"
+            href="https://github.whynikhil.xyz"
             target="_blank"
             className="w-12 h-12 rounded-full border border-white/10 bg-black/40 backdrop-blur-xl flex items-center justify-center hover:bg-white hover:text-black transition-all hover:shadow-[0_0_20px_rgba(255,255,255,0.3)]"
           >
@@ -823,5 +1197,6 @@ export default function App() {
       
       <div className="fixed inset-0 pointer-events-none opacity-[0.025] z-[100] bg-[url('https://grainy-gradients.vercel.app/noise.svg')]" />
     </motion.div>
+    </>
   );
 }
